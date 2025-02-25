@@ -139,3 +139,7 @@ class LaskerMorris:
           return False
       return True
 
+    def is_able_to_fly(self, player):
+        if player == "blue":
+            return self.bluepieces == 3
+        return self.orangepieces == 3

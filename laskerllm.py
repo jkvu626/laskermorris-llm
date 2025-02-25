@@ -155,7 +155,7 @@ def main():
                         model="gemini-2.0-flash",
                         config=types.GenerateContentConfig(
                             system_instruction=sys_instruct()),
-                        contents=["Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return no valid move. Do not include any additional text or explanation."]
+                        contents=[f"""Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). {"Note that the player is in flying phase." if game.is_able_to_fly("blue") else ""} If no valid move is possible, return no valid move. Do not include any additional text or explanation."""]
                     )
                     move = response.text.strip()
                     valid, error_message = validate_move(move, ai_player)
@@ -188,7 +188,7 @@ def main():
                         model="gemini-2.0-flash",
                         config=types.GenerateContentConfig(
                             system_instruction=sys_instruct()),
-                        contents=["Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return no valid move. Do not include any additional text or explanation."]
+                        contents=[f"""Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). {"Note that the player is in flying phase." if game.is_able_to_fly("orange") else ""} If no valid move is possible, return no valid move. Do not include any additional text or explanation."""]
                     )
                     move = response.text.strip()
 
