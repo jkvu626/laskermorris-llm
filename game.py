@@ -1,3 +1,5 @@
+import copy
+
 class LaskerMorris:
     def __init__(self):
         # Board positions as nodes with valid moves (graph adjacency list)
@@ -75,9 +77,16 @@ class LaskerMorris:
             self.positions[end] = player
             return True
         return False
+    
+    # this is where the validation will go - Validate the LLM’s move
+    # in the validation the legal move is looked at
+    # if the LLM creates a Mill but doesn’t take a piece, reset the game board to the previous move and ask the LLM to make a new move entirely
+
+    # another validity check before sending the move to the referee
+    # it references non-existent points, tries to remove a empty board piece or stone in a Mill with others available, or the like
 
     def capture(self, pos, player):
-        if self.positions[pos] == self.opponent(player):
+        if pos in self.positions and self.positions[pos] == self.opponent(player):
             self.positions[pos] = None
             return True
         return False
@@ -95,3 +104,38 @@ class LaskerMorris:
         # Return opposite player (X -> O) (O -> X)
         return 'X' if player == 'O' else 'O'
     # Board Interactions #
+
+    def copy(self):
+        new_game = LaskerMorris()
+        new_game.positions = copy.deepcopy(self.positions)
+        new_game.bluepieces = self.bluepieces
+        new_game.orangepieces = self.orangepieces
+        return new_game
+
+    def is_mill(self, position, player):
+      # checks if a mill is formed
+        for mill in self.mills:
+            if position in mill:
+                if all(self.positions[p] == player for p in mill):
+                    return True
+        return False
+    
+    def is_opponent_piece_in_mill(self, position, opponent_player):
+      # checks if an opponent piece is in a mill
+        for mill in self.mills:
+          if position in mill:
+            if all(self.positions[p] == opponent_player for p in mill):
+              return True
+        return False
+
+    def all_opponent_pieces_in_mill(self, opponent_player):
+      # checks if all opponent pieces are in a mill
+      opponent_pieces = [pos for pos, piece in self.positions.items() if piece == opponent_player]
+      if not opponent_pieces:
+        return False
+
+      for piece in opponent_pieces:
+        if not self.is_opponent_piece_in_mill(piece, opponent_player):
+          return False
+      return True
+
