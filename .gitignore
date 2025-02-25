@@ -1,6 +1,9 @@
 # Game Log.txt
 log.txt
 
+# Debug Log
+app.log
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
