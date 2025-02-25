@@ -217,7 +217,6 @@ def main():
                         fallback_move = gen_fallback_move(ai_player)
                         game_instance.apply_move(fallback_move, ai_player)
                         print(fallback_move, flush=True)
-                        print(f"DEBUG: Rate limit exceeded. Using fallback move.", file=sys.stderr) #Debug print to stderr
                         time.sleep(3)
                         continue
                     else:
