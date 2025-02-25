@@ -153,4 +153,36 @@ class LaskerMorris:
         else:
             return None
         
+    def check_mill_logic(self, instance, player, dest, rem):
+        game_copy = instance.copy()
+        game_copy.positions[dest] = player
+        if game_copy.is_mill(dest, player):
+            if rem == "r0":
+                return False, "Mill formed, removal required"
+            if rem not in self.positions:
+                return False, "Invalid removal position"
+            if game_copy.positions[rem] != game_copy.opponent(player):
+                return False, "STOP you cannot remove your own piece silly"
+            if game_copy.is_opponent_piece_in_mill(rem, game_copy.opponent(player)) and not game_copy.all_opponent_pieces_in_mill(game_copy.opponent(player)):
+                return False, "STOP cannot remove opponent's piece from mill cause there are other pieces are available!!!"
+        else:
+            return True
+    
+    def get_moves(self, player):
+        moves = []
+        if player == 'X' and self.bluepieces > 0:
+            for dest in self.positions:
+                if self.positions[dest] is None:
+                    moves.append(f"h1 {dest} r0")
+        elif player == 'O' and self.orangepieces > 0:
+            for dest in self.positions:
+                if self.positions[dest] is None:
+                    moves.append(f"h2 {dest} r0")
+        else:
+            for source, piece in self.positions.items():
+                if piece == player:
+                    for dest in self.adjacent[source]:
+                        if self.positions[dest] is None:
+                            moves.append(f"{source} {dest} r0")
+        return moves
 

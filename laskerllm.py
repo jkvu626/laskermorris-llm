@@ -56,6 +56,7 @@ client = genai.Client(api_key="AIzaSyCDK_eV3y7ATB0Mr5ERpwCNFfxgbdcTnE8")
 game_instance = game.LaskerMorris()
 board = game_instance.positions
 
+        
 def validate_move(move, player):
     parts = move.split()
     if len(parts) != 3:
@@ -73,18 +74,9 @@ def validate_move(move, player):
         if game_instance.positions[destination] is not None:
             return False, "Destination is not empty"
 
-        # this is here to check for mills and removals
-        game_copy = game_instance.copy()
-        game_copy.positions[destination] = player
-        if game_copy.is_mill(destination, player):
-            if remove == "r0":
-                return False, "Mill formed, removal required"
-            if remove not in game_instance.positions:
-                return False, "Invalid removal position"
-            if game_copy.positions[remove] != game_copy.opponent(player):
-                return False, "STOP you cannot remove your own piece silly"
-            if game_copy.is_opponent_piece_in_mill(remove, game_copy.opponent(player)) and not game_copy.all_opponent_pieces_in_mill(game_copy.opponent(player)):
-                return False, "STOP cannot remove opponent's piece from mill cause there are other pieces are available!!!"
+        # check logic for mills and removals
+        if not game_instance.check_mill_logic(game_instance, player, destination, remove):
+            return False
 
         return True, None
     else:
@@ -97,38 +89,14 @@ def validate_move(move, player):
         if destination not in game_instance.adjacent[source]:
             return False, "OOOO this destination is not adjacent"
 
-        # this is here to check for mills and removals
-        game_copy = game_instance.copy()
-        game_copy.positions[source] = None
-        game_copy.positions[destination] = player
-        if game_copy.is_mill(destination, player):
-            if remove == "r0":
-                return False, "Mill formed, removal required"
-            if remove not in game_instance.positions:
-                return False, "Invalid removal position"
-            if game_copy.positions[remove] != game_copy.opponent(player):
-                return False, "Cannot remove your own piece"
-            if game_copy.is_opponent_piece_in_mill(remove, game_copy.opponent(player)) and not game_copy.all_opponent_pieces_in_mill(game_copy.opponent(player)):
-                return False, "Cannot remove opponent's piece from mill when other pieces are available"
+        # check logic for mills and removals
+        if not game_instance.check_mill_logic(game_instance, player, destination, remove):
+            return False
 
         return True, None
 
 def gen_fallback_move(player):
-    possible_moves = []
-    if player == 'X' and game_instance.bluepieces > 0:
-        for dest in game_instance.positions:
-            if game_instance.positions[dest] is None:
-                possible_moves.append(f"h1 {dest} r0")
-    elif player == 'O' and game_instance.orangepieces > 0:
-        for dest in game_instance.positions:
-            if game_instance.positions[dest] is None:
-                possible_moves.append(f"h2 {dest} r0")
-    else:
-        for source, piece in game_instance.positions.items():
-            if piece == player:
-                for dest in game_instance.adjacent[source]:
-                    if game_instance.positions[dest] is None:
-                        possible_moves.append(f"{source} {dest} r0")
+    possible_moves = game_instance.get_moves(player)
 
     if possible_moves:
         fallback = random.choice(possible_moves).split()
@@ -217,7 +185,7 @@ def main():
                         fallback_move = gen_fallback_move(ai_player)
                         game_instance.apply_move(fallback_move, ai_player)
                         print(fallback_move, flush=True)
-                        time.sleep(3)
+                        time.sleep(2)
                         continue
                     else:
                         print(f"Opps an unexpected error occurred: {e}", flush=True)
