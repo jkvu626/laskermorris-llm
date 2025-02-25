@@ -1,4 +1,5 @@
 import copy
+import random
 
 class LaskerMorris:
     def __init__(self):
@@ -138,4 +139,18 @@ class LaskerMorris:
         if not self.is_opponent_piece_in_mill(piece, opponent_player):
           return False
       return True
+    
+    def best_capture(self, player):
+        opponent = self.opponent(player)
+        possible_captures = []
+
+        for pos in self.positions:
+            if self.positions[pos] == opponent:
+               possible_captures.append(pos)
+
+        if possible_captures:
+            return random.choice(possible_captures)
+        else:
+            return None
+        
 
