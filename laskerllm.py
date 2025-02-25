@@ -2,14 +2,8 @@ from google import genai
 from google.genai import types
 import game
 
-
-game = game.LaskerMorris()
-board = game.positions
-
-bluePlayer = True # Boolean tracking whether or not to use blue as the player
-
-def sys_instruct():
-    instructions= f"""
+def sys_instruct(board, blue_pieces, orange_pieces, current_player):
+    instructions = f"""
     "You are an expert Lasker Morris (Ten Men's Morris) game AI. Given the current board state and the game rules, determine a valid move for the current player.
 
     Here are the game rules:
@@ -43,32 +37,56 @@ def sys_instruct():
 
     Here is the current board state in the form of a python dictionary: {board}
 
-    Here is the number of stones in each players hand: {game.bluepieces if bluePlayer else game.orangepieces}
+    Here is the number of stones in each players hand: {blue_pieces if current_player == "X" else orange_pieces}
 
-    The current player is: {"blue" if bluePlayer else "orange"}
+    The current player is: {current_player}
 
     Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return "no valid move". Do not include any additional text or explanation."
     """
     return instructions
 
 client = genai.Client(api_key="AIzaSyCDK_eV3y7ATB0Mr5ERpwCNFfxgbdcTnE8")
+game_instance = game.LaskerMorris()
+board = game_instance.positions
 
-# Game loop - INTEGRATE THIS WITH REFEREE
-for i in range(3):
-    player = "X" if bluePlayer else "O"
+player_id = input().strip()
+bluePlayer = True if player_id == "blue" else False
+player = "X" if bluePlayer else "O"
+opponent = game_instance.opponent(player)
 
+if bluePlayer:
     response = client.models.generate_content(
         model="gemini-2.0-flash",
         config=types.GenerateContentConfig(
-            system_instruction=sys_instruct()),
+            system_instruction=sys_instruct(board, game_instance.bluepieces, game_instance.orangepieces, player)),
         contents=["Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return no valid move. Do not include any additional text or explanation."]
     )
+    move = response.text
+    game_instance.apply_move(move, player)
+    print(move, flush=True)
 
-    move = response.text  # Access the text content
-    if move:
-        game.apply_move(move, player)
-        print(f"Best Move: {move} Iteration: {i + 1} Player: {player}")
-    else:
-        print("API returned no move.")
-    bluePlayer = not bluePlayer
-    
+while True:
+    try:
+        line = input().strip()
+
+        if line.startswith("END:"):
+            print(line, flush=True)
+            break
+
+        if line: # check if the line is not empty
+            if game_instance.apply_move(line, opponent):
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    config=types.GenerateContentConfig(
+                        system_instruction=sys_instruct(game_instance.positions, game_instance.bluepieces, game_instance.orangepieces, player)),
+                    contents=["Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return no valid move. Do not include any additional text or explanation."]
+                )
+                move = response.text
+                game_instance.apply_move(move, player)
+                print(move, flush=True)
+            else:
+                print("Invalid Move", flush=True)
+                break
+        #If the line is empty, do nothing.
+    except EOFError:
+        break
