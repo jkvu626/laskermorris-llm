@@ -6,7 +6,7 @@ from google.genai import types
 from google.genai.errors import ClientError
 import game
 
-def sys_instruct(board):
+def sys_instruct(board, bluePlayer, blue_hand, orange_hand, mills):
     instructions = f"""
     "You are an expert Lasker Morris (Ten Men's Morris) game AI. Given the current board state and the game rules, determine a valid move for the current player.
 
@@ -44,75 +44,20 @@ def sys_instruct(board):
 
     Here is the current board state in the form of a python dictionary: {board}
 
-    Here is the number of stones in each players hand: {game_instance.bluepieces if bluePlayer else game_instance.orangepieces}
+    Here is the number of stones in each players hand: Blue: {blue_hand}, Orange: {orange_hand}
 
     Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return "no valid move". Do not include any additional text or explanation."
 
-    You want to prioritize forming mills, these mills are represented by this python array: {game_instance.mills}
+    You want to prioritize forming mills, these mills are represented by this python array: {mills}
     """
     return instructions
 
 client = genai.Client(api_key="AIzaSyCDK_eV3y7ATB0Mr5ERpwCNFfxgbdcTnE8")
 game_instance = game.LaskerMorris()
 board = game_instance.positions
+min_delay = 4
 
-def validate_move(move, player):
-    parts = move.split()
-    if len(parts) != 3:
-        return False, "Invalid move format"
-
-    source, destination, remove = parts
-
-    if source.startswith("h"):
-        if player == 'X' and game_instance.bluepieces <= 0:
-            return False, "Nothing left in hand!"
-        if player == 'O' and game_instance.orangepieces <= 0:
-            return False, "Nothing left in hand!"
-        if destination not in game_instance.positions:
-            return False, "Invalid destination"
-        if game_instance.positions[destination] is not None:
-            return False, "Destination is not empty"
-
-        # this is here to check for mills and removals
-        game_copy = game_instance.copy()
-        game_copy.positions[destination] = player
-        if game_copy.is_mill(destination, player):
-            if remove == "r0":
-                return False, "Mill formed, removal required"
-            if remove not in game_instance.positions:
-                return False, "Invalid removal position"
-            if game_copy.positions[remove] != game_copy.opponent(player):
-                return False, "STOP you cannot remove your own piece silly"
-            if game_copy.is_opponent_piece_in_mill(remove, game_copy.opponent(player)) and not game_copy.all_opponent_pieces_in_mill(game_copy.opponent(player)):
-                return False, "STOP cannot remove opponent's piece from mill cause there are other pieces are available!!!"
-
-        return True, None
-    else:
-        if source not in game_instance.positions or destination not in game_instance.positions:
-            return False, "STOP invalid source or destination"
-        if game_instance.positions[source] != player:
-            return False, "That is not your piece!!!"
-        if game_instance.positions[destination] is not None:
-            return False, "OOOO this destination is not empty"
-        if destination not in game_instance.adjacent[source]:
-            return False, "OOOO this destination is not adjacent"
-
-        # this is here to check for mills and removals
-        game_copy = game_instance.copy()
-        game_copy.positions[source] = None
-        game_copy.positions[destination] = player
-        if game_copy.is_mill(destination, player):
-            if remove == "r0":
-                return False, "Mill formed, removal required"
-            if remove not in game_instance.positions:
-                return False, "Invalid removal position"
-            if game_copy.positions[remove] != game_copy.opponent(player):
-                return False, "Cannot remove your own piece"
-            if game_copy.is_opponent_piece_in_mill(remove, game_copy.opponent(player)) and not game_copy.all_opponent_pieces_in_mill(game_copy.opponent(player)):
-                return False, "Cannot remove opponent's piece from mill when other pieces are available"
-
-        return True, None
-
+# this should generate a valid fallback move for the player
 def gen_fallback_move(player):
     possible_moves = []
     if player == 'X' and game_instance.bluepieces > 0:
@@ -126,109 +71,94 @@ def gen_fallback_move(player):
     else:
         for source, piece in game_instance.positions.items():
             if piece == player:
-                for dest in game_instance.adjacent[source]:
+                for dest in game_instance.adjacent.get(source, []):
                     if game_instance.positions[dest] is None:
                         possible_moves.append(f"{source} {dest} r0")
 
-    if possible_moves:
-        fallback = random.choice(possible_moves).split()
-        if game_instance.is_mill(fallback[1], player):
-            fallback[2] = game_instance.best_capture(player)
-        return (' '.join(fallback))
-    else:
-        return None
+    for move in possible_moves:
+        if game_instance.validate_move(move, player):
+            return move
+    return None
+
+# this should get a valid move from Gemini or falls back to a generated move
+def get_valid_ai_move(ai_player):
+    max_attempts = 5
+    attempts = 0
+    while attempts < max_attempts:
+        try:
+            start_time = time.time()
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                config=types.GenerateContentConfig(
+                    system_instruction=sys_instruct(board, bluePlayer, game_instance.bluepieces, game_instance.orangepieces, game_instance.mills)),
+                contents=["Provide a single valid move in the format A B C"]
+            )
+            move = response.text.strip()
+            if game_instance.validate_move(move, ai_player):
+                elapsed_time = time.time() - start_time
+                delay = max(0, min_delay - elapsed_time)
+                time.sleep(delay)
+                return move
+        except ClientError as e:
+            error_message = e.args[0]
+            if "429" in error_message or "RESOURCE_EXHAUSTED" in error_message:
+                print("Gemini hit quota limit", flush=True)
+                time.sleep(5)
+                continue
+            else:
+                print(f"Gemini ClientError: {e}", flush=True)
+                break
+        attempts += 1
+    return get_valid_fallback_move(ai_player)
+
+# this should keep generating fallback moves until a valid one is found
+def get_valid_fallback_move(ai_player):
+    while True:
+        fallback_move = gen_fallback_move(ai_player)
+        if fallback_move and game_instance.validate_move(fallback_move, ai_player):
+            print(f"Fallback move: {fallback_move}", flush=True)
+            return fallback_move
+        print("Invalid fallback move...just WRONG!", flush=True)
+        if fallback_move is None:
+            print("No valid fallback moves are there so the game is ending", flush=True)
+            return None
 
 def main():
     global bluePlayer
     player_color = None
-
     while True:
         try:
             game_input = sys.stdin.readline().strip()
-
             if game_input in ['blue', 'orange']:
                 player_color = game_input
                 bluePlayer = (player_color == 'blue')
                 ai_player = "X" if bluePlayer else "O"
                 if bluePlayer:
-                    response = client.models.generate_content(
-                        model="gemini-2.0-flash",
-                        config=types.GenerateContentConfig(
-                            system_instruction=sys_instruct(board)),
-                        contents=["Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return no valid move. Do not include any additional text or explanation."]
-                    )
-                    move = response.text.strip()
-                    valid, error_message = validate_move(move, ai_player)
-
-                    if valid:
+                    move = get_valid_ai_move(ai_player)
+                    if move:
                         game_instance.apply_move(move, ai_player)
                         print(move, flush=True)
                     else:
-                        fallback_move = gen_fallback_move(ai_player)
-                        if fallback_move:
-                            valid_fallback, fallback_error = validate_move(fallback_move, ai_player)
-                            if valid_fallback:
-                                game_instance.apply_move(fallback_move, ai_player)
-                                print(fallback_move, flush=True)
-                            else:
-                                print(f"Fallback move {fallback_move} also invalid: {fallback_error}", flush=True)
-                                break
-                        else:
-                            print(f"No valid or fallback move available. Original error: {error_message}", flush=True)
-                            break
+                        print("No valid move available so the game is ending", flush=True)
+                        break
                 continue
-
             else:
                 opponent_player = "O" if bluePlayer else "X"
-                game_instance.apply_move(game_input.strip(), opponent_player)
-
+                if not game_instance.apply_move(game_input.strip(), opponent_player):
+                    break
                 ai_player = "X" if bluePlayer else "O"
-                try:
-                    response = client.models.generate_content(
-                        model="gemini-2.0-flash",
-                        config=types.GenerateContentConfig(
-                            system_instruction=sys_instruct(board)),
-                        contents=["Provide a single valid move in the format A B C, where A is the source, B is the destination, and C is the stone to remove (or r0 if not returning a stone). If no valid move is possible, return no valid move. Do not include any additional text or explanation."]
-                    )
-                    move = response.text.strip()
-
-                    valid, error_message = validate_move(move, ai_player)
-
-                    if valid:
-                        game_instance.apply_move(move, ai_player)
-                        print(move, flush=True)
-                    else:
-                        fallback_move = gen_fallback_move(ai_player)
-                        if fallback_move:
-                            valid_fallback, fallback_error = validate_move(fallback_move, ai_player)
-                            if valid_fallback:
-                                game_instance.apply_move(fallback_move, ai_player)
-                                print(fallback_move, flush=True)
-                            else:
-                                print(f"Fallback move {fallback_move} also invalid: {fallback_error}", flush=True)
-                                break
-                        else:
-                            print(f"No valid or fallback move available: {error_message}", flush=True)
-                            break
-                    time.sleep(1)
-                except ClientError as e:
-                    error_str = str(e)
-                    if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                        fallback_move = gen_fallback_move(ai_player)
-                        game_instance.apply_move(fallback_move, ai_player)
-                        print(fallback_move, flush=True)
-                        time.sleep(3)
-                        continue
-                    else:
-                        print(f"Opps an unexpected error occurred: {e}", flush=True)
-                        break
-
-        except EOFError:
-            break
-        except BrokenPipeError:
+                move = get_valid_ai_move(ai_player)
+                if move:
+                    game_instance.apply_move(move, ai_player)
+                    print(move, flush=True)
+                else:
+                    print("No valid move available so the game is ending", flush=True)
+                    break
+                time.sleep(1)
+        except (EOFError, BrokenPipeError):
             break
         except Exception as e:
-            print(f"Opps an unexpected error occurred: {e}", flush=True)
+            print(f"Unexpected error: {e}", flush=True)
             break
 
 if __name__ == "__main__":

@@ -29,6 +29,10 @@ class LaskerMorris:
         self.positions = {pos: None for pos in self.adjacent.keys()}
         self.bluepieces = 10
         self.orangepieces = 10
+        self.phase = "Placing"
+        self.move_history = []
+        self.stalemate_count = 0
+        self.stalemate_threshold = 20
 
 
     def display(self):
@@ -58,33 +62,33 @@ class LaskerMorris:
 
     # Board Interactions #
     def place(self, position, player):
-        # Places a piece for a player ('X' or 'O') if the position is empty.
-        if player == 'X' and self.bluepieces > 0:
-            if self.positions[position] is None:
+    # Only place if the position is empty and the player still has stones to place
+        if position in self.positions and self.positions[position] is None:
+            if player == 'X' and self.bluepieces > 0:
                 self.bluepieces -= 1
                 self.positions[position] = player
                 return True
-        elif player == 'O' and self.orangepieces > 0:
-            if self.positions[position] is None:
+            elif player == 'O' and self.orangepieces > 0:
                 self.orangepieces -= 1
                 self.positions[position] = player
                 return True
-        return False
+        return False  # Invalid placement
+
 
     def move(self, start, end, player):
-        # Moves a piece if the move is valid.
-        if self.positions[start] == player and self.positions[end] is None and end in self.adjacent[start]:
-            self.positions[start] = None
-            self.positions[end] = player
-            return True
-        return False
-    
-    # this is where the validation will go - Validate the LLM’s move
-    # in the validation the legal move is looked at
-    # if the LLM creates a Mill but doesn’t take a piece, reset the game board to the previous move and ask the LLM to make a new move entirely
+        if self.positions.get(start) != player:
+            return False
+        if self.positions.get(end) is not None:
+            return False
+        remaining_stones = sum(1 for pos in self.positions if self.positions[pos] == player)
+        if remaining_stones > 3:
+            if end not in self.adjacent.get(start, []):
+                return False
 
-    # another validity check before sending the move to the referee
-    # it references non-existent points, tries to remove a empty board piece or stone in a Mill with others available, or the like
+        # Flying Phase
+        self.positions[start] = None
+        self.positions[end] = player
+        return True
 
     def capture(self, pos, player):
         if pos in self.positions and self.positions[pos] == self.opponent(player):
@@ -92,15 +96,125 @@ class LaskerMorris:
             return True
         return False
     
-    def apply_move(self, move, player):
+    def update_phase(self):
+        blue_stones_on_board = sum(1 for pos in self.positions if self.positions[pos] == 'X')
+        orange_stones_on_board = sum(1 for pos in self.positions if self.positions[pos] == 'O')
+        blue_total = blue_stones_on_board + self.bluepieces
+        orange_total = orange_stones_on_board + self.orangepieces
+
+        # When all stones are placed move to Moving Phase
+        if self.phase == "Placing" and self.bluepieces == 0 and self.orangepieces == 0:
+            self.phase = "Moving"
+
+        # When a player has only 3 pieces left on the board move to Flying Phase
+        elif self.phase == "Moving":
+            if blue_stones_on_board == 3 or orange_stones_on_board == 3:
+                self.phase = "Flying"
+
+    def validate_move(self, move, player):
         parts = move.split()
-        if len(parts) == 3:
-            if parts[0].startswith("h"):
-                return self.place(parts[1], player)
-            else:
-                return self.move(parts[0], parts[1], player)
+        if len(parts) != 3:
+            return False
+
+        source, destination, remove = parts
+        if source.startswith("h"):
+            if (player == 'X' and self.bluepieces <= 0) or (player == 'O' and self.orangepieces <= 0):
+                return False
+            if destination not in self.positions or self.positions[destination] is not None:
+                return False
+
+            # Mill validation
+            temp_game = self.copy()
+            temp_game.positions[destination] = player
+            if temp_game.is_mill(destination, player):
+                if remove == "r0":
+                    return False
+                if remove not in self.positions or temp_game.positions[remove] != temp_game.opponent(player):
+                    return False
+                if temp_game.is_opponent_piece_in_mill(remove, temp_game.opponent(player)) and not temp_game.all_opponent_pieces_in_mill(temp_game.opponent(player)):
+                    return False
+            elif remove != "r0":
+                return False
+            return True
+
+        # Moving a piece
+        if self.positions.get(source) != player or self.positions.get(destination) is not None:
+            return False
+
+        # Check flying phase
+        player_stones = sum(1 for pos in self.positions if self.positions[pos] == player)
+        if player_stones > 3 and destination not in self.adjacent.get(source, []):
+            return False
+
+        # Mill validation after moving
+        temp_game = self.copy()
+        temp_game.positions[source] = None
+        temp_game.positions[destination] = player
+        if temp_game.is_mill(destination, player):
+            if remove == "r0":
+                return False
+            if remove not in self.positions or temp_game.positions[remove] != temp_game.opponent(player):
+                return False
+            if temp_game.is_opponent_piece_in_mill(remove, temp_game.opponent(player)) and not temp_game.all_opponent_pieces_in_mill(temp_game.opponent(player)):
+                return False
+        elif remove != "r0":
+            return False
+
+        return True
+
+    # total number of stones a player has
+    def count_stones(self, player):
+        return sum(1 for pos in self.positions if self.positions[pos] == player) + (self.bluepieces if player == 'X' else self.orangepieces)
+
+    # any valid moves
+    def player_has_valid_moves(self, player):
+        for source, piece in self.positions.items():
+            if piece == player:
+                for dest in self.adjacent.get(source, []):
+                    if self.positions[dest] is None:
+                        return True
         return False
-    
+
+    # check to see if game should end yay!
+    def is_game_over(self, last_move_player):
+        opponent = self.opponent(last_move_player)
+        if self.count_stones(last_move_player) <= 2:
+            return True
+        if self.player_has_valid_moves(last_move_player) is False:
+            return True
+        if self.stalemate_count >= self.stalemate_threshold:
+            return True
+        return False
+
+    def apply_move(self, move, player):
+        if not self.validate_move(move, player):
+            return False
+
+        source, destination, remove = move.split()
+        opponent_player = self.opponent(player)
+
+        # placing piece from hand
+        if source.startswith("h"):
+            if player == 'X':
+                self.bluepieces -= 1
+            else:
+                self.orangepieces -= 1
+            self.positions[destination] = player
+        else:
+            # moving piece on the board
+            self.positions[source] = None
+            self.positions[destination] = player
+
+        # check for mills and removals
+        if self.is_mill(destination, player):
+            self.stalemate_count = 0
+            self.capture(remove, player)
+        else:
+            self.stalemate_count += 1
+        self.update_phase()
+        return not self.is_game_over(player)
+
+
     def opponent(self, player):
         # Return opposite player (X -> O) (O -> X)
         return 'X' if player == 'O' else 'O'
