@@ -95,8 +95,6 @@ class LaskerMorris:
     def apply_move(self, move, player):
         parts = move.split()
         if len(parts) == 3:
-            if parts[2] != 'r0':
-                return self.capture(parts[2], player) 
             if parts[0].startswith("h"):
                 return self.place(parts[1], player)
             else:
@@ -108,27 +106,39 @@ class LaskerMorris:
         return 'X' if player == 'O' else 'O'
     # Board Interactions #
 
-    def board_copy(self):
+    def copy(self):
         new_game = LaskerMorris()
         new_game.positions = copy.deepcopy(self.positions)
         new_game.bluepieces = self.bluepieces
         new_game.orangepieces = self.orangepieces
         return new_game
 
-    def is_mill(self, move, player):
-        parts = move.split()
-        board = self.board_copy()
-        if parts[0].startswith('h'):
-            board.place(parts[1], player)
-        else:
-            board.move(parts[0], parts[1], player)
-        
+    def is_mill(self, position, player):
       # checks if a mill is formed
         for mill in self.mills:
-            if parts[1] in mill:
-                if all(board.positions[p] == player for p in mill):
+            if position in mill:
+                if all(self.positions[p] == player for p in mill):
                     return True
         return False
+    
+    def is_opponent_piece_in_mill(self, position, opponent_player):
+      # checks if an opponent piece is in a mill
+        for mill in self.mills:
+          if position in mill:
+            if all(self.positions[p] == opponent_player for p in mill):
+              return True
+        return False
+
+    def all_opponent_pieces_in_mill(self, opponent_player):
+      # checks if all opponent pieces are in a mill
+      opponent_pieces = [pos for pos, piece in self.positions.items() if piece == opponent_player]
+      if not opponent_pieces:
+        return False
+
+      for piece in opponent_pieces:
+        if not self.is_opponent_piece_in_mill(piece, opponent_player):
+          return False
+      return True
     
     def best_capture(self, player):
         opponent = self.opponent(player)
@@ -143,21 +153,36 @@ class LaskerMorris:
         else:
             return None
         
+    def check_mill_logic(self, instance, player, dest, rem):
+        game_copy = instance.copy()
+        game_copy.positions[dest] = player
+        if game_copy.is_mill(dest, player):
+            if rem == "r0":
+                return False, "Mill formed, removal required"
+            if rem not in self.positions:
+                return False, "Invalid removal position"
+            if game_copy.positions[rem] != game_copy.opponent(player):
+                return False, "STOP you cannot remove your own piece silly"
+            if game_copy.is_opponent_piece_in_mill(rem, game_copy.opponent(player)) and not game_copy.all_opponent_pieces_in_mill(game_copy.opponent(player)):
+                return False, "STOP cannot remove opponent's piece from mill cause there are other pieces are available!!!"
+        else:
+            return True
     
     def get_moves(self, player):
         moves = []
         if player == 'X' and self.bluepieces > 0:
             for dest in self.positions:
                 if self.positions[dest] is None:
-                    moves.append(f"h1 {dest} xx")
+                    moves.append(f"h1 {dest} r0")
         elif player == 'O' and self.orangepieces > 0:
             for dest in self.positions:
                 if self.positions[dest] is None:
-                    moves.append(f"h2 {dest} xx")
+                    moves.append(f"h2 {dest} r0")
         else:
             for source, piece in self.positions.items():
                 if piece == player:
                     for dest in self.adjacent[source]:
                         if self.positions[dest] is None:
-                            moves.append(f"{source} {dest} xx")
+                            moves.append(f"{source} {dest} r0")
         return moves
+
