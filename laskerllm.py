@@ -78,51 +78,63 @@ def validate_move(move, player):
 
     source, destination, remove = parts
 
-    if game_instance.is_mill(move, player):
-        if game_instance.positions[destination] == None:
+    # 1. **Check if it's a placement move (h1/h2)**
+    if source.startswith('h'):
+        if pieces <= 0:  # No pieces left in hand
             return False
-        if game_instance.positions[destination] != game_instance.opponent(player):
+        if destination not in game_instance.positions:  # Invalid board position
+            return False
+        if game_instance.positions[destination] is not None:  # Position already occupied
             return False
 
-    # Validate Place
-    if source.startswith('h'):
-        # Check for place without pieces in hand
-        if pieces <= 0:
-            return False
-        # Check for invalid destination
-        if destination not in game_instance.positions:
-            return False
-        if game_instance.positions[destination] is not None:
-            return False
-    # Validate Move
+    # 2. **Check if it's a movement move**
     else:
-        # Check for invalid source / destination
         if source not in game_instance.positions or destination not in game_instance.positions:
+            return False  # Invalid board positions
+        
+        if game_instance.positions[source] != player:  # Source doesn't belong to player
             return False
-        # Check for appropriate player in source 
-        if game_instance.positions[source] != player:
+        
+        if game_instance.positions[destination] is not None:  # Destination occupied
             return False
-        # Check for non empty destination
-        if game_instance.positions[destination] is not None:
-            return False
-        # Check for non adjacent move while not flying
-        if destination not in game_instance.adjacent[source] and pieces > 3:
-            return False
+
+        # Check if the move is adjacent (unless in flying phase)
+        if pieces > 3 and destination not in game_instance.adjacent[source]:
+            return False  # Regular moves must be adjacent
+
+    # 3. **If a mill is formed, check capture rules**
+    if game_instance.is_mill(move, player):
+        if remove not in game_instance.positions or game_instance.positions[remove] != game_instance.opponent(player):
+            return False  # Can only remove opponent's piece
+
+        # Check if opponent has non-mill pieces
+        opponent_pieces = [pos for pos in game_instance.positions if game_instance.positions[pos] == game_instance.opponent(player)]
+        opponent_mill_pieces = [pos for pos in opponent_pieces if any(all(game_instance.positions[p] == game_instance.opponent(player) for p in mill) for mill in game_instance.mills)]
+
+        if remove in opponent_mill_pieces and len(opponent_pieces) != len(opponent_mill_pieces):
+            return False  # Cannot remove from a mill unless no other options exist
+
     return True
+
 
 def gen_fallback_move(player):
     possible_moves = game_instance.get_moves(player)
+    random.shuffle(possible_moves)  # Shuffle to get a random move first
 
-    if possible_moves:
-        fallback = random.choice(possible_moves)
-        parts = fallback.split()
-        if game_instance.is_mill(fallback, player):
-            parts[2] = game_instance.best_capture(player)
+    for move in possible_moves:
+        parts = move.split()
+        if game_instance.is_mill(move, player):
+            parts[2] = game_instance.best_capture(player)  # Assign best capture
         else:
-            parts[2] = 'r0'
-        return (' '.join(parts))
-    else:
-        return None
+            parts[2] = 'r0'  # Default no capture
+
+        fallback_move = ' '.join(parts)
+        
+        if validate_move(fallback_move, player):
+            return fallback_move  # Return first valid fallback move
+
+    return None  # No valid fallback move found
+
 
 def main():
     global bluePlayer
@@ -189,7 +201,7 @@ def main():
                     else:
                         fallback_move = gen_fallback_move(ai_player)
                         if fallback_move:
-                            valid_fallback, fallback_error = validate_move(fallback_move, ai_player)
+                            valid_fallback = validate_move(fallback_move, ai_player)
                             if valid_fallback:
                                 log(False, move)
                                 game_instance.apply_move(fallback_move, ai_player)
@@ -201,7 +213,7 @@ def main():
                         else:
                             print(f"No valid or fallback move available", flush=True)
                             break
-                    time.sleep(1)
+                    time.sleep(3)
                 except ClientError as e:
                     error_str = str(e)
                     if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
@@ -210,7 +222,7 @@ def main():
                             file.write(f"429 ERROR FALLBACK MOVE: {move}\n")
                         game_instance.apply_move(fallback_move, ai_player)
                         print(fallback_move, flush=True)
-                        time.sleep(2)
+                        time.sleep(3)
                         continue
                     else:
                         print(f"Oops an unexpected error occurred: {e}", flush=True)
