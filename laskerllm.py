@@ -220,9 +220,9 @@ def main():
             break
         except BrokenPipeError:
             break
-        # except Exception as e:
-        #     print(f"EXCEPTION: {e}", flush=True)
-        #     break
+        except Exception as e:
+            print(f"EXCEPTION: {e}", flush=True)
+            break
 
 if __name__ == "__main__":
     main()
